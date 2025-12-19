@@ -56,8 +56,18 @@ class PrestaShopService:
             response = self.session.get(url, params=filters, timeout=30)
             response.raise_for_status()
 
+            # Log del contenido de la respuesta para debugging
+            logger.debug(f"Response status: {response.status_code}")
+            logger.debug(f"Response length: {len(response.content)} bytes")
+
             # Parsear XML a dict
             data = xmltodict.parse(response.content)
+
+            # Log de la estructura de datos para debugging
+            if data:
+                logger.debug(f"Parsed data keys: {list(data.keys())}")
+                if 'prestashop' in data and data['prestashop']:
+                    logger.debug(f"Prestashop keys: {list(data['prestashop'].keys())}")
 
             # Normalizar la estructura de orders
             orders = self._normalize_orders(data)
@@ -82,10 +92,20 @@ class PrestaShopService:
         Returns:
             Lista normalizada de pedidos
         """
-        prestashop = data.get('prestashop', {})
+        # Verificar que data y prestashop no sean None
+        if not data:
+            logger.warning("Empty data received from PrestaShop API")
+            return []
+
+        prestashop = data.get('prestashop')
+        if not prestashop:
+            logger.warning("No 'prestashop' key in API response")
+            return []
+
         orders = []
 
-        if prestashop.get('orders', {}).get('order'):
+        # Verificar si hay órdenes
+        if prestashop.get('orders') and prestashop['orders'].get('order'):
             order_data = prestashop['orders']['order']
 
             # Si es un solo pedido, convertir a lista
