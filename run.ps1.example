@@ -1,0 +1,113 @@
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONIOENCODING = "utf-8"
+
+# Configuración - MODIFICAR ESTA RUTA
+$ProjectPath = "C:\ruta\al\proyecto\confirmation-invoice"
+$LogPath = "$ProjectPath\logs"
+$VenvPath = "$ProjectPath\venv"
+
+# Crear directorio de logs si no existe
+if (-not (Test-Path $LogPath)) {
+    New-Item -ItemType Directory -Path $LogPath -Force
+}
+
+# Función de logging
+function Write-Log {
+    param([string]$Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "$timestamp - $Message"
+    Write-Host $logMessage
+    try {
+        Add-Content -Path "$LogPath\scheduler.log" -Value $logMessage -Force
+    } catch {
+        Write-Host "ERROR writing to scheduler.log: $_"
+    }
+}
+
+try {
+    Write-Log "Iniciando Confirmador de Facturas - Toolstock"
+
+    # Cambiar al directorio del proyecto
+    Set-Location $ProjectPath
+
+    # Verificar que el entorno virtual existe
+    if (-not (Test-Path "$VenvPath\Scripts\python.exe")) {
+        Write-Log "El entorno virtual no existe. Creando..."
+
+        # Crear entorno virtual
+        python -m venv venv
+
+        if (-not $?) {
+            throw "Error al crear el entorno virtual"
+        }
+
+        Write-Log "Entorno virtual creado exitosamente"
+    }
+
+    # Activar entorno virtual e instalar dependencias
+    $pythonExe = "$VenvPath\Scripts\python.exe"
+    $pipExe = "$VenvPath\Scripts\pip.exe"
+
+    # Verificar si requirements.txt existe
+    if (Test-Path "$ProjectPath\requirements.txt") {
+        Write-Log "Instalando dependencias..."
+
+        $installOutput = & $pipExe install -r requirements.txt 2>&1
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log "ADVERTENCIA: Algunos paquetes pueden no haberse instalado correctamente"
+            Write-Log $installOutput
+        } else {
+            Write-Log "Dependencias instaladas correctamente"
+        }
+    } else {
+        Write-Log "ADVERTENCIA: No se encontró requirements.txt"
+    }
+
+    # Verificar que .env existe
+    if (-not (Test-Path "$ProjectPath\.env")) {
+        Write-Log "ERROR: No se encontró el archivo .env"
+        Write-Log "Por favor, crea el archivo .env basándote en .env.example"
+        throw "Archivo .env no encontrado"
+    }
+
+    # Verificar que credentials-service.json existe
+    if (-not (Test-Path "$ProjectPath\credentials-service.json")) {
+        Write-Log "ADVERTENCIA: No se encontró credentials-service.json"
+        Write-Log "El script puede fallar si necesita acceso a Google Drive/Sheets"
+    }
+
+    # Ejecutar el script principal
+    $arguments = @("main.py")
+
+    Write-Log "Ejecutando: $pythonExe $arguments"
+
+    # Ejecutar con captura de salida
+    $processOutput = & $pythonExe $arguments 2>&1
+    $exitCode = $LASTEXITCODE
+
+    # Escribir output a archivos
+    $processOutput | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } |
+        Out-File "$LogPath\scheduler_error.log" -Encoding UTF8
+
+    $processOutput | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } |
+        Out-File "$LogPath\scheduler_output.log" -Encoding UTF8
+
+    # Mostrar output en consola también
+    $processOutput | ForEach-Object { Write-Host $_ }
+
+    if ($exitCode -eq 0) {
+        Write-Log "Proceso finalizado con éxito (Código: $exitCode)"
+    } else {
+        Write-Log "Proceso fallido con código de salida: $exitCode"
+        exit $exitCode
+    }
+
+} catch {
+    Write-Log "ERROR: $($_.Exception.Message)"
+    Write-Log "SEGUIMIENTO: $($_.ScriptStackTrace)"
+    exit 1
+} finally {
+    Write-Log "Proceso finalizado"
+}
